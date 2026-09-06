@@ -1,0 +1,71 @@
+#!/usr/bin/env python
+"""
+Fetch the real assignment corpus + released dev topics/qrels via
+ir_datasets and write them into data/full/, in the same format used by
+data/toy/. Same mechanism as Assignment 1's script of the same name.
+
+Usage:
+    python scripts/download_full_corpus.py
+    python scripts/download_full_corpus.py --dataset beir/trec-covid --out data/full
+"""
+import argparse
+import json
+import os
+
+DEFAULT_DATASET = "beir/trec-covid"
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dataset", default=DEFAULT_DATASET, help="ir_datasets dataset id")
+    parser.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "..", "data", "full"))
+    args = parser.parse_args()
+
+    try:
+        import ir_datasets
+    except ImportError:
+        raise SystemExit(
+            "ir_datasets is not installed. Run `pip install ir_datasets` "
+            "(it is already listed in requirements.txt) and try again."
+        )
+
+    os.makedirs(args.out, exist_ok=True)
+    print(f"Loading '{args.dataset}' via ir_datasets (this downloads and caches the dataset)...")
+    dataset = ir_datasets.load(args.dataset)
+
+    corpus_path = os.path.join(args.out, "corpus.jsonl")
+    n_docs = 0
+    with open(corpus_path, "w", encoding="utf-8") as f:
+        for doc in dataset.docs_iter():
+            text = doc.default_text() if hasattr(doc, "default_text") else getattr(doc, "text", "")
+            f.write(json.dumps({"doc_id": doc.doc_id, "text": text}) + "\n")
+            n_docs += 1
+    print(f"Wrote {n_docs} documents to {corpus_path}")
+
+    queries_path = os.path.join(args.out, "queries_dev.tsv")
+    n_queries = 0
+    with open(queries_path, "w", encoding="utf-8") as f:
+        for query in dataset.queries_iter():
+            text = query.default_text() if hasattr(query, "default_text") else getattr(query, "text", "")
+            f.write(f"{query.query_id}\t{text}\n")
+            n_queries += 1
+    print(f"Wrote {n_queries} queries to {queries_path}")
+
+    qrels_path = os.path.join(args.out, "qrels_dev.txt")
+    n_qrels = 0
+    with open(qrels_path, "w", encoding="utf-8") as f:
+        for qrel in dataset.qrels_iter():
+            f.write(f"{qrel.query_id} 0 {qrel.doc_id} {qrel.relevance}\n")
+            n_qrels += 1
+    print(f"Wrote {n_qrels} qrel lines to {qrels_path}")
+
+    print(
+        "\nDone. NOTE: the queries/qrels ir_datasets ships for this collection are "
+        "released as your DEV set only. Course staff hold out a disjoint topic set "
+        "AND apply an undisclosed noise-injection recipe for Track C -- see "
+        "docs/GRADING.md."
+    )
+
+
+if __name__ == "__main__":
+    main()
