@@ -25,14 +25,58 @@ import re
 from collections import Counter
 from typing import Dict, List
 
+from submission.porter import stem as _porter_stem
+
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+# English stopword list, reused from my Assignment 1 indexer.py (SMART/NLTK
+# style). _TOKEN_RE splits "don't" into "don" + "t", so contraction
+# fragments are listed as well as the whole-word forms.
+STOPWORDS = frozenset("""
+a about above after again against all am an and any are aren aren't as at
+be because been before being below between both but by can can't cannot
+could couldn couldn't d did didn didn't do does doesn doesn't doing don
+don't down during each few for from further had hadn hadn't has hasn
+hasn't have haven haven't having he he'd he'll he's her here here's hers
+herself him himself his how how's i i'd i'll i'm i've if in into is isn
+isn't it it's its itself let's ll m me more most mustn mustn't my myself
+no nor not of off on once only or other ought our ours ourselves out over
+own re s same shan shan't she she'd she'll she's should shouldn shouldn't
+so some such t than that that's the their theirs them themselves then
+there there's these they they'd they'll they're they've this those
+through to too under until up ve very was wasn wasn't we we'd we'll we're
+we've were weren weren't what what's when when's where where's which
+while who who's whom why why's with won won't would wouldn wouldn't you
+you'd you'll you're you've your yours yourself yourselves
+""".split())
+
+_STEM_CACHE: Dict[str, str] = {}
+
+
+def _stem(token: str) -> str:
+    # A corpus repeats the same word forms millions of times; stem each
+    # distinct token once.
+    stemmed = _STEM_CACHE.get(token)
+    if stemmed is None:
+        stemmed = _STEM_CACHE[token] = _porter_stem(token)
+    return stemmed
 
 
 def tokenize(text: str) -> List[str]:
-    """Lowercase, alphanumeric-token tokeniser. Deliberately simple (no
-    stemming, no stopword removal) -- add either yourself if you want them;
-    just apply the same tokenize() consistently to documents and queries."""
-    return _TOKEN_RE.findall(text.lower())
+    """Lowercase, alphanumeric tokeniser with stopword removal and Porter
+    stemming (stemming last, so word-form variants like vaccine/vaccines
+    share one term). Used for documents AND queries, so both sides of every
+    comparison are tokenised identically."""
+    return [_stem(t) for t in _TOKEN_RE.findall(text.lower()) if t not in STOPWORDS]
+
+
+def tokenize_query(text: str) -> List[str]:
+    """tokenize(), except a query made only of stopwords (e.g. "to be or
+    not to be") keeps its stemmed tokens instead of becoming empty."""
+    tokens = tokenize(text)
+    if not tokens:
+        tokens = [_stem(t) for t in _TOKEN_RE.findall(text.lower())]
+    return tokens
 
 
 class CollectionStats:
