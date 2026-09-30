@@ -69,7 +69,7 @@ from submission.lm_utils import CollectionStats, dirichlet_smoothed_log_prob, to
 # ---------------------------------------------------------------------------
 # Dirichlet smoothing for the reranking score (Section 3.1). Larger mu
 # smooths more aggressively toward the collection model.
-DIRICHLET_MU = 1000.0
+DIRICHLET_MU = 700.0
 # Dirichlet mu used inside the relevance-model estimate, P(w|D).
 RM_DOC_MU = 1500.0
 
@@ -77,7 +77,7 @@ RM_DOC_MU = 1500.0
 RM_VARIANT = "rm3"
 # RM3 interpolation: P_RM3(w) = FB_LAMBDA * P(w|Q) + (1 - FB_LAMBDA) * P(w|R).
 # FB_LAMBDA = 1 ignores feedback, 0 trusts the relevance model completely.
-FB_LAMBDA = 0.5
+FB_LAMBDA = 0.3
 # Expansion terms kept from P(w|R) (top-N by probability, renormalised).
 FB_TERMS = 50
 # At most this many seed documents (best under the ORIGINAL query's
