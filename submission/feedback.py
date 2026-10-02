@@ -61,7 +61,7 @@ from collections import Counter
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from submission.corpus_utils import load_corpus
-from submission.lm_utils import CollectionStats, dirichlet_smoothed_log_prob, tokenize
+from submission.lm_utils import CollectionStats, dirichlet_smoothed_log_prob, tokenize_query
 
 # ---------------------------------------------------------------------------
 # Tunable parameters. Every one of these is a real design choice; the
@@ -69,9 +69,13 @@ from submission.lm_utils import CollectionStats, dirichlet_smoothed_log_prob, to
 # ---------------------------------------------------------------------------
 # Dirichlet smoothing for the reranking score (Section 3.1). Larger mu
 # smooths more aggressively toward the collection model.
-DIRICHLET_MU = 700.0
-# Dirichlet mu used inside the relevance-model estimate, P(w|D).
-RM_DOC_MU = 700.0
+DIRICHLET_MU = 500.0
+# Dirichlet mu used inside the relevance-model estimate, P(w|D). Kept equal
+# to DIRICHLET_MU: at FB_LAMBDA=1 this makes relevance_model_feedback()
+# mathematically identical to score_candidates() (verified in
+# tests/test_relevance_models.py), which bounds how far feedback can ever
+# fall below plain query likelihood.
+RM_DOC_MU = 500.0
 
 # Which relevance model relevance_model_feedback() uses: "rm1", "rm2", "rm3".
 RM_VARIANT = "rm3"
@@ -154,7 +158,7 @@ def relevance_model_feedback(
             "score_candidates()'s error for the same reason."
         )
     stats = _STATS
-    query_terms = [t for t in tokenize(query) if stats.collection_prob(t) > 0.0]
+    query_terms = [t for t in tokenize_query(query) if stats.collection_prob(t) > 0.0]
     if not query_terms or not candidate_doc_ids:
         return _ql_rerank(query, candidate_doc_ids, k, stats)
 
@@ -184,7 +188,7 @@ def relevance_model_feedback(
 # tiny corpus -- see tests/test_relevance_models.py.
 # ---------------------------------------------------------------------------
 def _ql_rerank(query: str, doc_ids: List[str], k: int, stats: CollectionStats) -> List[Tuple[str, float]]:
-    query_terms = tokenize(query)
+    query_terms = tokenize_query(query)
     if not query_terms:
         return []
     doc_ids = list(dict.fromkeys(doc_ids))
