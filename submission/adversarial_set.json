@@ -1,5 +1,98 @@
 {
-  "_comment": "OPTIONAL bonus track (assignment Section 7, docs/GRADING.md). Map a handful of dev query IDs to a doc_id list you believe will induce maximal drift in an unknown opponent's relevance_model_feedback(). Delete the _comment key or leave this file absent entirely if you are not attempting the bonus track -- absence is scored as +0.0, never a penalty.",
-  "q1": ["d3", "d9", "d14"],
-  "q5": ["d2", "d11"]
+  "7": [
+    "cc7htcc8",
+    "8ixb8y3j",
+    "7d5q0g0s",
+    "svd6ls12",
+    "5jtzt8um",
+    "6alsigxk",
+    "2u16otbf",
+    "1a2alsjt",
+    "njt7vyiy",
+    "rx81w320"
+  ],
+  "10": [
+    "c7l88gjn",
+    "u56ydlve",
+    "8r0orhkm",
+    "rmv5kg3w",
+    "8ffyp3ds",
+    "2abo9bwv",
+    "1drsmri9",
+    "ekajojon",
+    "hbalyfy3",
+    "pzmo4hja"
+  ],
+  "18": [
+    "p3t6dsfd",
+    "ej76fsxa",
+    "bdfli7l0",
+    "qd5asgg8",
+    "dt2pew66",
+    "mfb2or98",
+    "vm3fayex",
+    "bpz8rw4c",
+    "sjenehbl",
+    "7zt3bc3a"
+  ],
+  "20": [
+    "a9sj00y8",
+    "fqzczofm",
+    "dkxhbmic",
+    "k7myxo6p",
+    "7ibc0yvr",
+    "gic43uwz",
+    "6xlb7bfa",
+    "3446eyi3",
+    "rxmpi61o",
+    "75sgnhgc"
+  ],
+  "23": [
+    "fhpvshr2",
+    "p3qsn8di",
+    "moi0hu6l",
+    "baodjrw2",
+    "xrmwpep6",
+    "f0pwjxfv",
+    "mm4ngrla",
+    "udybki7w",
+    "a91obysp",
+    "mcfm913n"
+  ],
+  "26": [
+    "j6ihxzm2",
+    "2mvcyvbl",
+    "y5ptscri",
+    "6n2yyfpx",
+    "dmuufxtm",
+    "d3owtd98",
+    "9fa9nta0",
+    "fu8ndhdo",
+    "4al2c1qe",
+    "ywsm11aw"
+  ],
+  "29": [
+    "jnw0pnfu",
+    "yho3jfwl",
+    "9bhp3lph",
+    "a73plf6x",
+    "7yz89ity",
+    "c0r2nbzo",
+    "cvavb7j1",
+    "gykudnxf",
+    "ttl1f9dd",
+    "b9cc9kcd"
+  ],
+  "48": [
+    "mcleen25",
+    "0zj4gm0b",
+    "hdtwugxx",
+    "hn1z0817",
+    "v31uzr68",
+    "zhfrgaxf",
+    "dieaqxmi",
+    "zgdvo29n",
+    "ol7g2ped",
+    "i9odfs51"
+  ]
 }
