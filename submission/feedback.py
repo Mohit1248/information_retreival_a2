@@ -61,7 +61,7 @@ from collections import Counter
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from submission.corpus_utils import load_corpus
-from submission.lm_utils import CollectionStats, dirichlet_smoothed_log_prob, tokenize_query
+from submission.lm_utils import CollectionStats, dirichlet_smoothed_log_prob, tokenize, tokenize_query
 
 # ---------------------------------------------------------------------------
 # Tunable parameters. Every one of these is a real design choice; the
@@ -95,6 +95,34 @@ POSTERIOR_SCALE = 10.0
 # (capped by the number of seed docs actually used).
 MIN_TERM_SUPPORT = 2
 
+# ---------------------------------------------------------------------------
+# Optional bigram/proximity extension (assignment Section 2.1, "Higher-order
+# language models (optional)"): score_candidates() is extended to prefer
+# documents where adjacent query words also appear adjacently, on top of the
+# required, correctly-implemented unigram baseline above -- not a substitute
+# for it. Scoped deliberately to the final candidate-scoring step only
+# (_ql_rerank / query_log_likelihood_interp below): relevance_model_feedback()
+# still ESTIMATES its relevance model from the seed set using pure unigram
+# statistics (estimate_rm1/estimate_rm2, untouched by this section). The
+# assignment's own caution applies to that estimation step specifically --
+# "bigram co-occurrence counts within a small pseudo-relevant set are
+# sparser... they could just as easily be more sensitive to a contaminated
+# set" -- so that is exactly the part this extension does NOT touch; using
+# bigrams only to score a fixed document against a fixed query carries none
+# of that estimation-sparsity risk.
+#
+# BIGRAM_WEIGHT: interpolation weight given to the smoothed bigram
+# probability at each adjacent query-term pair, P = BIGRAM_WEIGHT *
+# P(bigram|D) + (1 - BIGRAM_WEIGHT) * P(unigram|D). 0 disables this
+# extension entirely (falls back to plain query_log_likelihood).
+BIGRAM_WEIGHT = 0.15
+# Dirichlet mu for the bigram document model. Kept separate from
+# DIRICHLET_MU because bigram counts are far sparser than unigram counts
+# over the same corpus -- the right amount of smoothing is a different
+# empirical question (assignment's own warning: measure it, don't assume
+# the unigram value transfers).
+BIGRAM_MU = 15.0
+
 _STOPWORDS = frozenset(
     "a about above after again against all am an and any are as at be because been before being "
     "below between both but by can could did do does doing down during each few for from further "
@@ -114,13 +142,22 @@ _STOPWORDS = frozenset(
 # ---------------------------------------------------------------------------
 _STATS: Optional[CollectionStats] = None
 
+# Bigram collection-wide statistics (built once in prepare(), alongside
+# _STATS, for the optional extension above) and a lazy per-document bigram
+# count cache, mirroring CollectionStats' own lazy doc_term_counts() cache.
+_BIGRAM_COLLECTION_COUNTS: Counter = Counter()
+_BIGRAM_COLLECTION_LENGTH: int = 0
+_BIGRAM_DOC_CACHE: Dict[str, Counter] = {}
+
 
 def prepare(corpus_path: str) -> None:
     """Load the corpus and build collection-wide statistics. Called once,
     before any score_candidates()/relevance_model_feedback() calls."""
-    global _STATS
+    global _STATS, _BIGRAM_COLLECTION_COUNTS, _BIGRAM_COLLECTION_LENGTH, _BIGRAM_DOC_CACHE
     corpus = load_corpus(corpus_path)
     _STATS = CollectionStats.from_corpus(corpus)
+    _BIGRAM_COLLECTION_COUNTS, _BIGRAM_COLLECTION_LENGTH = _build_bigram_collection_stats(corpus)
+    _BIGRAM_DOC_CACHE = {}
 
 
 def score_candidates(query: str, candidate_doc_ids: List[str], k: int = 10) -> List[Tuple[str, float]]:
@@ -192,7 +229,13 @@ def _ql_rerank(query: str, doc_ids: List[str], k: int, stats: CollectionStats) -
     if not query_terms:
         return []
     doc_ids = list(dict.fromkeys(doc_ids))
-    scores = {d: query_log_likelihood(query_terms, d, stats, DIRICHLET_MU) for d in doc_ids}
+    if BIGRAM_WEIGHT > 0.0 and len(query_terms) > 1:
+        scores = {
+            d: query_log_likelihood_interp(query_terms, d, stats, DIRICHLET_MU, BIGRAM_MU, BIGRAM_WEIGHT)
+            for d in doc_ids
+        }
+    else:
+        scores = {d: query_log_likelihood(query_terms, d, stats, DIRICHLET_MU) for d in doc_ids}
     ranked = sorted(scores.items(), key=lambda pair: pair[1], reverse=True)
     return ranked[:k]
 
@@ -214,6 +257,85 @@ def doc_term_prob(term: str, doc_id: str, stats: CollectionStats, mu: float) -> 
     doc_length = stats.doc_lengths.get(doc_id, 0)
     count = stats.doc_term_counts(doc_id).get(term, 0)
     return (count + mu * stats.collection_prob(term)) / (doc_length + mu)
+
+
+# ---------------------------------------------------------------------------
+# Bigram/proximity extension internals (see the BIGRAM_WEIGHT comment above
+# for scope). Bigrams are pairs of CONSECUTIVE SURVIVING tokens after
+# tokenize()'s stopword removal, not consecutive raw words -- i.e. the same
+# token stream doc_term_counts()/collection_prob() already use, so "origin"
+# and "covid" in "origin of covid" count as adjacent once "of" is dropped.
+# This is a deliberate, documented choice (a stopped-bigram model), not an
+# oversight; it also means it needs no separate tokenisation pass beyond
+# what tokenize() already does for the unigram model.
+# ---------------------------------------------------------------------------
+def _build_bigram_collection_stats(corpus: List[Tuple[str, str]]) -> Tuple[Counter, int]:
+    """One-time collection-wide bigram pass, mirroring CollectionStats'
+    own unigram pass in prepare() (Section 3.1's P(w|C) legitimately needs a
+    one-time full-corpus read; this is the bigram equivalent, P(bigram|C))."""
+    counts: Counter = Counter()
+    total = 0
+    for _doc_id, text in corpus:
+        tokens = tokenize(text)
+        pairs = list(zip(tokens, tokens[1:]))
+        counts.update(pairs)
+        total += len(pairs)
+    return counts, total
+
+
+def bigram_collection_prob(bigram: Tuple[str, str]) -> float:
+    """P(bigram | C), the bigram-model analogue of CollectionStats.collection_prob()."""
+    if _BIGRAM_COLLECTION_LENGTH == 0:
+        return 0.0
+    return _BIGRAM_COLLECTION_COUNTS.get(bigram, 0) / _BIGRAM_COLLECTION_LENGTH
+
+
+def doc_bigram_counts(doc_id: str, stats: CollectionStats) -> Counter:
+    """Bigram counts for one document, computed on first request and
+    cached -- same lazy-on-demand design as CollectionStats.doc_term_counts(),
+    for the same reason (at most ~100 candidate documents are ever scored
+    per query, not the whole corpus)."""
+    if doc_id not in stats.doc_texts:
+        raise KeyError(f"doc_id {doc_id!r} was not in the corpus passed to prepare()")
+    if doc_id not in _BIGRAM_DOC_CACHE:
+        tokens = tokenize(stats.doc_texts[doc_id])
+        _BIGRAM_DOC_CACHE[doc_id] = Counter(zip(tokens, tokens[1:]))
+    return _BIGRAM_DOC_CACHE[doc_id]
+
+
+def doc_bigram_prob(bigram: Tuple[str, str], doc_id: str, stats: CollectionStats, mu: float) -> float:
+    """Dirichlet-smoothed P(bigram|D), same form as doc_term_prob() but over
+    the bigram vocabulary: (c(bigram,D) + mu*P(bigram|C)) / (|bigrams in D| + mu)."""
+    counts = doc_bigram_counts(doc_id, stats)
+    doc_bigram_length = sum(counts.values())
+    return (counts.get(bigram, 0) + mu * bigram_collection_prob(bigram)) / (doc_bigram_length + mu)
+
+
+def query_log_likelihood_interp(
+    query_terms: Sequence[str], doc_id: str, stats: CollectionStats, mu: float, bigram_mu: float, bigram_weight: float
+) -> float:
+    """log P(Q|D) under an interpolated bigram-unigram model: the first
+    query term contributes a plain unigram term (no left context to form a
+    bigram from); each later term w_i contributes
+    log(bigram_weight * P(w_{i-1},w_i | D) + (1 - bigram_weight) * P(w_i | D)),
+    so a document where query words also appear adjacent, in order, scores
+    higher, while one that only matches the words individually is not
+    penalised relative to the plain unigram model (interpolation, not
+    replacement)."""
+    if not query_terms:
+        return 0.0
+    doc_length = stats.doc_lengths.get(doc_id, 0)
+    term_counts = stats.doc_term_counts(doc_id) if doc_id in stats.doc_texts else {}
+    total = dirichlet_smoothed_log_prob(
+        term_counts.get(query_terms[0], 0), doc_length, stats.collection_prob(query_terms[0]), mu
+    )
+    for i in range(1, len(query_terms)):
+        w_prev, w = query_terms[i - 1], query_terms[i]
+        p_uni = doc_term_prob(w, doc_id, stats, mu)
+        p_bi = doc_bigram_prob((w_prev, w), doc_id, stats, bigram_mu) if doc_id in stats.doc_texts else 0.0
+        p = bigram_weight * p_bi + (1.0 - bigram_weight) * p_uni
+        total += math.log(p) if p > 0.0 else -50.0
+    return total
 
 
 def _select_feedback_docs(query_terms: Sequence[str], seed_ids: Sequence[str], stats: CollectionStats) -> List[str]:
