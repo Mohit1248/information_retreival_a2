@@ -123,6 +123,16 @@ BIGRAM_WEIGHT = 0.15
 # the unigram value transfers).
 BIGRAM_MU = 15.0
 
+# Optional proximity extension (assignment Section 2.1: "bigram, positional,
+# or proximity signals"). Unlike bigram (strictly adjacent, ordered pairs),
+# this rewards any two DISTINCT query terms within PROXIMITY_WINDOW tokens
+# of each other, either order. Scoped the same way as bigram: only affects
+# the final candidate-SCORING step (_ql_rerank), never
+# relevance_model_feedback()'s RM1/RM2/RM3 estimation. Document-local
+# additive bonus, no collection-wide smoothing of its own.
+PROXIMITY_WEIGHT = 0.02
+PROXIMITY_WINDOW = 10
+
 _STOPWORDS = frozenset(
     "a about above after again against all am an and any are as at be because been before being "
     "below between both but by can could did do does doing down during each few for from further "
@@ -148,16 +158,18 @@ _STATS: Optional[CollectionStats] = None
 _BIGRAM_COLLECTION_COUNTS: Counter = Counter()
 _BIGRAM_COLLECTION_LENGTH: int = 0
 _BIGRAM_DOC_CACHE: Dict[str, Counter] = {}
+_DOC_TOKENS_CACHE: Dict[str, List[str]] = {}
 
 
 def prepare(corpus_path: str) -> None:
     """Load the corpus and build collection-wide statistics. Called once,
     before any score_candidates()/relevance_model_feedback() calls."""
-    global _STATS, _BIGRAM_COLLECTION_COUNTS, _BIGRAM_COLLECTION_LENGTH, _BIGRAM_DOC_CACHE
+    global _STATS, _BIGRAM_COLLECTION_COUNTS, _BIGRAM_COLLECTION_LENGTH, _BIGRAM_DOC_CACHE, _DOC_TOKENS_CACHE
     corpus = load_corpus(corpus_path)
     _STATS = CollectionStats.from_corpus(corpus)
     _BIGRAM_COLLECTION_COUNTS, _BIGRAM_COLLECTION_LENGTH = _build_bigram_collection_stats(corpus)
     _BIGRAM_DOC_CACHE = {}
+    _DOC_TOKENS_CACHE = {}
 
 
 def score_candidates(query: str, candidate_doc_ids: List[str], k: int = 10) -> List[Tuple[str, float]]:
@@ -236,8 +248,45 @@ def _ql_rerank(query: str, doc_ids: List[str], k: int, stats: CollectionStats) -
         }
     else:
         scores = {d: query_log_likelihood(query_terms, d, stats, DIRICHLET_MU) for d in doc_ids}
+    if PROXIMITY_WEIGHT > 0.0 and len(set(query_terms)) > 1:
+        for d in doc_ids:
+            scores[d] += PROXIMITY_WEIGHT * proximity_bonus(query_terms, d, stats, PROXIMITY_WINDOW)
     ranked = sorted(scores.items(), key=lambda pair: pair[1], reverse=True)
     return ranked[:k]
+
+
+def doc_tokens(doc_id: str, stats: CollectionStats) -> List[str]:
+    if doc_id not in stats.doc_texts:
+        raise KeyError(f"doc_id {doc_id!r} was not in the corpus passed to prepare()")
+    if doc_id not in _DOC_TOKENS_CACHE:
+        _DOC_TOKENS_CACHE[doc_id] = tokenize(stats.doc_texts[doc_id])
+    return _DOC_TOKENS_CACHE[doc_id]
+
+
+def proximity_bonus(query_terms: Sequence[str], doc_id: str, stats: CollectionStats, window: int) -> float:
+    if doc_id not in stats.doc_texts:
+        return 0.0
+    tokens = doc_tokens(doc_id, stats)
+    distinct_terms = sorted(set(query_terms))
+    positions: Dict[str, List[int]] = {}
+    for i, tok in enumerate(tokens):
+        if tok in query_terms:
+            positions.setdefault(tok, []).append(i)
+    bonus = 0.0
+    for i in range(len(distinct_terms)):
+        pi = positions.get(distinct_terms[i])
+        if not pi:
+            continue
+        for j in range(i + 1, len(distinct_terms)):
+            pj = positions.get(distinct_terms[j])
+            if not pj:
+                continue
+            for a in pi:
+                for b in pj:
+                    d = abs(a - b)
+                    if 0 < d <= window:
+                        bonus += 1.0 / d
+    return bonus
 
 
 def query_log_likelihood(query_terms: Sequence[str], doc_id: str, stats: CollectionStats, mu: float) -> float:
