@@ -130,7 +130,7 @@ BIGRAM_MU = 15.0
 # the final candidate-SCORING step (_ql_rerank), never
 # relevance_model_feedback()'s RM1/RM2/RM3 estimation. Document-local
 # additive bonus, no collection-wide smoothing of its own.
-PROXIMITY_WEIGHT = 0.02
+PROXIMITY_WEIGHT = 0.05
 PROXIMITY_WINDOW = 10
 
 _STOPWORDS = frozenset(
